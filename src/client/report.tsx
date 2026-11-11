@@ -248,6 +248,8 @@ function StuckCard({ data }: { data: FunnelSummary }) {
   const [device, setDevice] = useState<FunnelDevice | 'all'>('all');
   const [shown, setShown] = useState(PAGE);
   const people = data.stuck.filter((p) => device === 'all' || p.device === device);
+  // An app whose sign-up asks for no handle has nothing for Reach them: the column is left out, and its room goes to what went wrong.
+  const reach = data.stuck.some((p) => p.contact);
   return (
     <Card>
       <CardHeader
@@ -285,13 +287,13 @@ function StuckCard({ data }: { data: FunnelSummary }) {
                 <Th className="w-[22%] min-w-40">Who</Th>
                 <Th className="w-[10%] min-w-26">Signed up</Th>
                 <Th className="w-[23%] min-w-58">Stopped at</Th>
-                <Th className="w-[20%] min-w-44">What went wrong</Th>
-                <Th className="w-[10%] min-w-26">Came from</Th>
-                <Th className="w-[15%] min-w-30">Reach them</Th>
+                <Th className={reach ? 'w-[20%] min-w-44' : 'w-[30%] min-w-44'}>What went wrong</Th>
+                <Th className={reach ? 'w-[10%] min-w-26' : 'w-[15%] min-w-26'}>Came from</Th>
+                {reach ? <Th className="w-[15%] min-w-30">Reach them</Th> : null}
               </THead>
               <TBody>
                 {people.slice(0, shown).map((person) => (
-                  <StuckRow key={person.id} person={person} />
+                  <StuckRow key={person.id} person={person} reach={reach} />
                 ))}
               </TBody>
             </Table>
@@ -338,7 +340,7 @@ function Stopped({ person }: { person: FunnelPerson }) {
   );
 }
 
-function StuckRow({ person }: { person: FunnelPerson }) {
+function StuckRow({ person, reach }: { person: FunnelPerson; reach: boolean }) {
   return (
     <Tr className="align-top">
       <Td>
@@ -357,20 +359,20 @@ function StuckRow({ person }: { person: FunnelPerson }) {
         ) : null}
       </Td>
       <Td>
+        {/* The reason and when, without its step's label: "Linked an account" above a failure reads as if it worked. */}
         {person.problem ? (
           <>
-            <div className="font-medium text-foreground">{person.problem.label}</div>
-            {person.problem.reason ? <div className="[overflow-wrap:anywhere] text-muted-foreground">{person.problem.reason}</div> : null}
+            <div className="[overflow-wrap:anywhere] text-foreground">{person.problem.reason ?? 'No reason given'}</div>
             <div className="text-xs text-muted-foreground/80">
               <RelativeTime iso={person.problem.at} />
             </div>
           </>
         ) : (
-          <span className="text-muted-foreground/80">Nothing reported</span>
+          <span className="text-muted-foreground/80">—</span>
         )}
       </Td>
       <Td className="[overflow-wrap:anywhere]">{person.source ?? <span className="text-muted-foreground/80">—</span>}</Td>
-      <Td className="[overflow-wrap:anywhere]">{person.contact ?? <span className="text-muted-foreground/80">—</span>}</Td>
+      {reach ? <Td className="[overflow-wrap:anywhere]">{person.contact ?? <span className="text-muted-foreground/80">—</span>}</Td> : null}
     </Tr>
   );
 }
@@ -398,7 +400,7 @@ function StuckItem({ person }: { person: FunnelPerson }) {
       </div>
       {person.problem ? (
         <p className="mt-2 [overflow-wrap:anywhere] text-muted-foreground">
-          <span className="font-medium text-foreground">{person.problem.label}:</span> {person.problem.reason ?? 'No reason given'}{' '}
+          <span className="font-medium text-foreground">Went wrong:</span> {person.problem.reason ?? 'No reason given'}{' '}
           <span className="text-xs text-muted-foreground/80">
             (<RelativeTime iso={person.problem.at} />)
           </span>

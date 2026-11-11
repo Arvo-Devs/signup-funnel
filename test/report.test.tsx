@@ -170,7 +170,10 @@ describe('SignupFunnelReport', () => {
     // The last thing that went wrong, with its own number this time.
     expect(table).toContain('The link window did not open (code 4013)');
     expect(table).toContain('That code has expired');
-    expect(table).toContain('Nothing reported');
+    // Its step's label is not above it: "Linked an account" over a failure would read as if it worked.
+    expect(table).not.toContain('>Linked an account</div>');
+    // Nothing went wrong: a dash, like any empty cell.
+    expect(table).not.toContain('Nothing reported');
     expect(table).toContain('Last seen');
     expect(table).toContain('>Not recorded</div>');
     expect(table).toContain('@sample_handle');
@@ -178,6 +181,19 @@ describe('SignupFunnelReport', () => {
     // People who reached the goal are not in it.
     expect(table).not.toContain('Sample a1<');
     expect(table).not.toContain('Sample a8');
+  });
+
+  test('stuck sign-ups: an app that asks for no handle has no Reach them column, and what went wrong gets its room', () => {
+    const sample = sampleSummary();
+    const html = seeded({ stuck: sample.stuck.map((person) => ({ ...person, contact: null })) });
+    const { table, list } = stuckParts(html);
+    expect(table).not.toContain('Reach them');
+    expect(list).not.toContain('Reach them');
+    expect(table).toContain('w-[30%] min-w-44');
+    // Every row has one cell per column.
+    const rows = [...table.matchAll(/<tr [^>]*>([\s\S]*?)<\/tr>/g)].map((m) => [...m[1]!.matchAll(/<td /g)].length);
+    expect(new Set(rows)).toEqual(new Set([5]));
+    expect([...table.matchAll(/<th /g)]).toHaveLength(5);
   });
 
   test('stuck sign-ups where a table does not fit: the same people as short blocks, with only what there is to say', () => {
@@ -195,8 +211,9 @@ describe('SignupFunnelReport', () => {
     expect(list).toContain('Made a key, never used it');
     expect(list).toContain('Not recorded');
     const text = words(list);
-    expect(text).toContain('Linked an account: The link window did not open (code 4013)');
-    expect(text).toContain('Confirmed the email: That code has expired');
+    expect(text).toContain('Went wrong: The link window did not open (code 4013)');
+    expect(text).toContain('Went wrong: That code has expired');
+    expect(text).not.toContain('Linked an account:');
     expect(text).toContain('Came from Telegram');
     expect(text).toContain('Reach them: @sample_handle');
     // A block has no empty columns to fill.
