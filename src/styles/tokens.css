@@ -1,0 +1,112 @@
+/*
+ * Color defaults for @arvo/signup-funnel's Sign-up funnel page: every color
+ * name the classes in src/ui/vendor/* and src/client/* use, named the shadcn
+ * way, with the @theme mapping Tailwind v4 needs. It is the file
+ * @arvo/traffic ships, so an app that already maps these names for the
+ * Traffic or the Email page has nothing to add.
+ *
+ * The names are the ones @arvo/support-inbox's tokens.css defines, plus
+ * background (inputs, the share bars' track, the dialog footer), accent
+ * (hover) and chart-1 (the chart's line and bars). Shared names keep
+ * support-inbox's values, except muted-foreground in light mode: it is darker
+ * here, because the page's quietest text is muted-foreground at 80% and needs
+ * to stay readable on white. An app that imports both files should import
+ * this one second.
+ *
+ * Apps that already define these names (BetterFans Link points them at its
+ * own colors in app/global.css) should NOT import this file: it would declare
+ * them again and, depending on import order, override the app's values.
+ *
+ * Apps WITHOUT them import it once in their Tailwind v4 entry stylesheet,
+ * with an @source line so Tailwind generates the classes this package uses:
+ *
+ *   @import "tailwindcss";
+ *   @import "@arvo/signup-funnel/styles/tokens.css";
+ *   @source "../node_modules/@arvo/signup-funnel/src";
+ *
+ * Dark mode: the values flip when a `.dark` class is on an ancestor
+ * (usually <html>), as in support-inbox.
+ */
+
+:root {
+  --background: #e9ebf5;
+  --foreground: #1a1731;
+  --card: #ffffff;
+  --muted: #eef0f8;
+  --muted-foreground: #4c4f6d;
+  --border: #e5e7f2;
+  --input: #d9dcec;
+  --primary: #4f46e5;
+  --primary-foreground: #ffffff;
+  --accent: #eceef6;
+  --ring: #818cf8;
+  --chart-1: #4f46e5;
+  /* Status hues as in support-inbox: the -soft and -border colors are mixed
+     from the hue itself, so --danger, --warning and --success are only read
+     by these mixes. */
+  --danger: #e11d48;
+  --danger-strong: #9f1239;
+  --danger-soft: color-mix(in oklab, var(--danger) 9%, var(--card));
+  --danger-border: color-mix(in oklab, var(--danger) 25%, var(--card));
+  --warning: #b45309;
+  --warning-strong: #92400e;
+  --warning-soft: color-mix(in oklab, var(--warning) 9%, var(--card));
+  --warning-border: color-mix(in oklab, var(--warning) 28%, var(--card));
+  --success: #059669;
+  --success-strong: #047857;
+  --success-soft: color-mix(in oklab, var(--success) 9%, var(--card));
+  --success-border: color-mix(in oklab, var(--success) 25%, var(--card));
+}
+
+.dark {
+  --background: #15122a;
+  --foreground: #ececf8;
+  --card: #1c1932;
+  --muted: #262242;
+  --muted-foreground: #a3a1cc;
+  --border: #2e2a4d;
+  --input: #3a3563;
+  --primary: #6366f1;
+  --primary-foreground: #ffffff;
+  --accent: #2a2647;
+  --ring: #818cf8;
+  --chart-1: #818cf8;
+  /* Status hues brighten a step on dark surfaces, and -strong turns lighter
+     than the hue, since it is text on a -soft tint mixed from a dark card. */
+  --danger: #f43f5e;
+  --danger-strong: #fda4af;
+  --danger-soft: color-mix(in oklab, var(--danger) 16%, var(--card));
+  --danger-border: color-mix(in oklab, var(--danger) 35%, var(--card));
+  --warning: #f59e0b;
+  --warning-strong: #fcd34d;
+  --warning-soft: color-mix(in oklab, var(--warning) 14%, var(--card));
+  --warning-border: color-mix(in oklab, var(--warning) 35%, var(--card));
+  --success: #10b981;
+  --success-strong: #6ee7b7;
+  --success-soft: color-mix(in oklab, var(--success) 14%, var(--card));
+  --success-border: color-mix(in oklab, var(--success) 35%, var(--card));
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-danger-strong: var(--danger-strong);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-border: var(--danger-border);
+  --color-warning-strong: var(--warning-strong);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-border: var(--warning-border);
+  --color-success-strong: var(--success-strong);
+  --color-success-soft: var(--success-soft);
+  --color-success-border: var(--success-border);
+}

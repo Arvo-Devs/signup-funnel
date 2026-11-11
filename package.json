@@ -1,0 +1,49 @@
+{
+  "name": "@arvo/signup-funnel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A Sign-up funnel page for an app's admin panel: how far each new account got on the way to its first real use, where each one stopped, and the last thing that went wrong. Each app lists its own steps.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts",
+    "./notes": "./src/notes.ts",
+    "./styles/*": "./src/styles/*",
+    "./migrations/*": "./migrations/*"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@base-ui/react": "^1.8.0",
+    "@tanstack/react-query": "^5.100.9",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.14.0",
+    "next": "^16.3.8",
+    "postgres": "^3.4.5",
+    "react": "^19.2.6",
+    "tailwind-merge": "^3.5.0"
+  },
+  "devDependencies": {
+    "@base-ui/react": "^1.8.0",
+    "@tanstack/react-query": "^5.100.9",
+    "@types/bun": "^1.3.9",
+    "@types/node": "^25.5.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.14.0",
+    "next": "16.4.4",
+    "postgres": "^3.4.5",
+    "react": "^19.2.9",
+    "react-dom": "^19.2.9",
+    "tailwind-merge": "^3.5.0",
+    "typescript": "^6.0.2"
+  }
+}
