@@ -172,8 +172,10 @@ describe('SignupFunnelReport', () => {
     expect(table).toContain('That code has expired');
     // Its step's label is not above it: "Linked an account" over a failure would read as if it worked.
     expect(table).not.toContain('>Linked an account</div>');
-    // Nothing went wrong: a dash, like any empty cell.
+    // Nothing went wrong: the cell stays empty, like any empty cell.
     expect(table).not.toContain('Nothing reported');
+    // Never an em or en dash, anywhere on the page: some apps' copy rules forbid them.
+    expect(html).not.toMatch(/[\u2013\u2014]/);
     expect(table).toContain('Last seen');
     expect(table).toContain('>Not recorded</div>');
     expect(table).toContain('@sample_handle');

@@ -367,12 +367,11 @@ function StuckRow({ person, reach }: { person: FunnelPerson; reach: boolean }) {
               <RelativeTime iso={person.problem.at} />
             </div>
           </>
-        ) : (
-          <span className="text-muted-foreground/80">—</span>
-        )}
+        ) : null}
       </Td>
-      <Td className="[overflow-wrap:anywhere]">{person.source ?? <span className="text-muted-foreground/80">—</span>}</Td>
-      {reach ? <Td className="[overflow-wrap:anywhere]">{person.contact ?? <span className="text-muted-foreground/80">—</span>}</Td> : null}
+      {/* An empty cell stays empty: no dash, which some apps' copy rules forbid, and the rows where something went wrong stand out. */}
+      <Td className="[overflow-wrap:anywhere]">{person.source}</Td>
+      {reach ? <Td className="[overflow-wrap:anywhere]">{person.contact}</Td> : null}
     </Tr>
   );
 }
