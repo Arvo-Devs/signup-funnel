@@ -11,20 +11,43 @@ import {
   type FunnelSignupFact,
   type FunnelSummary,
 } from '../shared/funnel';
-import { recordingSince, stepsFor, trafficSignups } from './steps';
+import { cleanReason, recordingSince, stepsFor, trafficSignups } from './steps';
 
 const DAY = 24 * 60 * 60 * 1000;
+/** Failures read per account from the app's own data: the newest. */
+const PROBLEMS_PER_ACCOUNT = 20;
 
 const text = (value: unknown, max: number): string | null => (typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : null);
+
+/** A time as ISO text, or null for anything that is not one. */
+function isoTime(value: unknown): string | null {
+  if (value === null || value === undefined || value === '') return null;
+  const time = value instanceof Date ? value : new Date(String(value));
+  return Number.isFinite(time.getTime()) ? time.toISOString() : null;
+}
+
+/** The failures an account's own data shows, on the app's steps, oldest first, the newest 20. */
+function ownProblems(value: unknown, stepKeys: ReadonlySet<string>): FunnelAccountFacts['problems'] {
+  if (!Array.isArray(value)) return [];
+  const found: { step: string; reason: string; at: string }[] = [];
+  for (const problem of value as unknown[]) {
+    if (!problem || typeof problem !== 'object') continue;
+    const { step, reason, at } = problem as Record<string, unknown>;
+    const when = isoTime(at);
+    const said = cleanReason(reason);
+    if (typeof step === 'string' && stepKeys.has(step) && when && said) found.push({ step, reason: said, at: when });
+  }
+  return found.sort((a, b) => a.at.localeCompare(b.at)).slice(-PROBLEMS_PER_ACCOUNT);
+}
 
 /** An account from the app as the rules take it, or null for one with no id or no time it was made. */
 export function accountFacts(account: FunnelAccount, stepKeys: ReadonlySet<string>): FunnelAccountFacts | null {
   if (!account || typeof account.id !== 'string' || !account.id) return null;
-  const made = account.createdAt instanceof Date ? account.createdAt : new Date(String(account.createdAt));
-  if (!Number.isFinite(made.getTime())) return null;
+  const made = isoTime(account.createdAt);
+  if (!made) return null;
   return {
     id: account.id,
-    createdAt: made.toISOString(),
+    createdAt: made,
     name: text(account.name, 120),
     email: text(account.email, 254),
     done: Array.isArray(account.done) ? account.done.filter((key): key is string => typeof key === 'string' && stepKeys.has(key)) : [],
@@ -33,6 +56,8 @@ export function accountFacts(account: FunnelAccount, stepKeys: ReadonlySet<strin
     device: account.device === 'phone' || account.device === 'computer' ? account.device : null,
     source: text(account.source, 80),
     contact: text(account.contact, 80),
+    problems: ownProblems(account.problems, stepKeys),
+    lastSeenAt: isoTime(account.lastSeenAt),
   };
 }
 
@@ -74,6 +99,7 @@ export async function funnelSummary<User extends FunnelUser>(
     generatedAt: now.toISOString(),
     ...buildFunnel({ steps: config.steps, accounts, rows, signups }),
     recordingSince: await recordingSince(sql),
+    needsReports: config.steps.some((step) => step.fromData !== true),
     truncated: found.length > FUNNEL_ACCOUNTS_MAX,
   };
 }

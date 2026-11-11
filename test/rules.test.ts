@@ -22,6 +22,8 @@ const facts = (id: string, extra: Partial<FunnelAccountFacts> = {}): FunnelAccou
   device: null,
   source: null,
   contact: null,
+  problems: [],
+  lastSeenAt: null,
   ...extra,
 });
 const row = (userId: string, step: string, minute: number, extra: Partial<FunnelStepRow> = {}): FunnelStepRow => ({
@@ -210,10 +212,93 @@ describe('the small rules', () => {
       device: 'phone',
       source: null,
       contact: null,
+      problems: [],
+      lastSeenAt: null,
     });
     expect(accountFacts({ id: '', createdAt: new Date() }, keys)).toBeNull();
     expect(accountFacts({ id: 'a2', createdAt: 'not a time' }, keys)).toBeNull();
     expect(accountFacts({ id: 'a3', createdAt: new Date('2026-11-05T10:00:00Z'), device: 'tablet' as never }, keys)?.device).toBeNull();
+  });
+});
+
+describe('what the app’s own data shows', () => {
+  const keys = new Set(STEPS.map((s) => s.key));
+  const at = (minute: number) => `2026-11-05T10:${String(minute).padStart(2, '0')}:00.000Z`;
+
+  test('its failures are counted with the reported ones, by people, and move nobody forward', () => {
+    const out = buildFunnel({
+      steps: STEPS,
+      accounts: [
+        facts('one', { done: ['email_confirmed', 'key_made'], problems: [{ step: 'account_linked', reason: 'The creator’s sign-in failed', at: at(30) }] }),
+        facts('two', { done: ['key_made'], problems: [{ step: 'account_linked', reason: 'The creator’s sign-in failed', at: at(31) }] }),
+        facts('three', { done: ['email_confirmed'] }),
+      ],
+      rows: [row('three', 'account_linked', 32, { ok: false, reason: 'The creator’s sign-in failed' })],
+    });
+    expect(out.problems).toEqual([{ step: 'account_linked', label: 'Linked an account', reason: 'The creator’s sign-in failed', people: 3 }]);
+    expect(out.reachedGoal).toBe(0);
+    expect(out.stuck.find((p) => p.id === 'one')).toMatchObject({ reached: 'key_made', problem: { step: 'account_linked', reason: 'The creator’s sign-in failed', at: at(30) } });
+  });
+
+  test('the last thing that went wrong is the newest, reported or not', () => {
+    const out = buildFunnel({
+      steps: STEPS,
+      accounts: [
+        facts('own-newer', { problems: [{ step: 'account_linked', reason: 'The link expired', at: at(40) }] }),
+        facts('report-newer', { problems: [{ step: 'account_linked', reason: 'The link expired', at: at(10) }] }),
+      ],
+      rows: [
+        row('own-newer', 'email_confirmed', 20, { ok: false, reason: 'The code expired' }),
+        row('report-newer', 'email_confirmed', 20, { ok: false, reason: 'The code expired' }),
+      ],
+    });
+    const person = (id: string) => out.stuck.find((p) => p.id === id);
+    expect(person('own-newer')?.problem).toMatchObject({ reason: 'The link expired', at: at(40) });
+    expect(person('report-newer')?.problem).toMatchObject({ reason: 'The code expired', at: at(20) });
+  });
+
+  test('last seen is the later of the app’s own time and the last report', () => {
+    const out = buildFunnel({
+      steps: STEPS,
+      accounts: [
+        facts('own-later', { lastSeenAt: at(50) }),
+        facts('report-later', { lastSeenAt: at(1) }),
+        facts('own-only', { lastSeenAt: at(7) }),
+        facts('neither'),
+      ],
+      rows: [row('own-later', 'email_confirmed', 10), row('report-later', 'email_confirmed', 10)],
+    });
+    const seen = Object.fromEntries(out.stuck.map((p) => [p.id, p.lastSeenAt]));
+    expect(seen).toEqual({ 'own-later': at(50), 'report-later': at(10), 'own-only': at(7), neither: null });
+  });
+
+  test('an account’s failures from the app: only its steps, a real time, one clean line, the newest 20, oldest first', () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({ step: 'account_linked', reason: `Try ${i + 1}`, at: new Date(Date.UTC(2026, 10, 5, 10, i)) }));
+    const read = accountFacts(
+      {
+        id: 'a1',
+        createdAt: '2026-11-05T09:00:00Z',
+        lastSeenAt: new Date('2026-11-06T08:00:00Z'),
+        problems: [
+          { step: 'nope', reason: 'Not a step', at: at(1) },
+          { step: 'key_made', reason: 'No time', at: 'never' },
+          { step: 'key_made', reason: '   ', at: at(2) },
+          { step: 'key_made', reason: ' Two\nlines ', at: at(3) },
+          ...many,
+        ],
+      },
+      keys,
+    );
+    expect(read?.lastSeenAt).toBe('2026-11-06T08:00:00.000Z');
+    expect(read?.problems).toHaveLength(20);
+    expect(read?.problems[0]).toEqual({ step: 'account_linked', reason: 'Try 6', at: '2026-11-05T10:05:00.000Z' });
+    expect(read?.problems.at(-1)).toEqual({ step: 'account_linked', reason: 'Try 25', at: '2026-11-05T10:24:00.000Z' });
+    const few = accountFacts({ id: 'a2', createdAt: at(0), problems: [{ step: 'key_made', reason: ' Two\nlines ', at: at(3) }, { step: 'key_made', reason: 'x', at: at(2) }] }, keys);
+    expect(few?.problems).toEqual([
+      { step: 'key_made', reason: 'x', at: at(2) },
+      { step: 'key_made', reason: 'Two lines', at: at(3) },
+    ]);
+    expect(accountFacts({ id: 'a3', createdAt: at(0), problems: 'nope' as never, lastSeenAt: 'never' }, keys)).toMatchObject({ problems: [], lastSeenAt: null });
   });
 });
 

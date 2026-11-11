@@ -8,8 +8,11 @@
 //                 the earlier ones (nobody reaches the goal without the steps
 //                 before it), which keeps the bars falling and lets accounts
 //                 older than the reporting still be placed
-//   went wrong    the last report that did not go through, whichever step it
-//                 was for. It does not move the account forward
+//   went wrong    the last report that did not go through, or the last
+//                 failure the app's own data shows, whichever step it was
+//                 for. It does not move the account forward
+//   last seen     the later of the last report and when the app last saw
+//                 the account
 //   phone or      what the app gave, else Traffic's sign-up row, else the
 //   computer      first report; a tablet counts as a phone (it cannot install
 //                 a desktop app either)
@@ -55,6 +58,10 @@ export type FunnelAccountFacts = Readonly<{
   device: 'phone' | 'computer' | null;
   source: string | null;
   contact: string | null;
+  /** Failures the app's own data shows, oldest first, with the time as ISO text. */
+  problems: readonly Readonly<{ step: string; reason: string; at: string }>[];
+  /** When the app last saw the account, as ISO text. */
+  lastSeenAt: string | null;
 }>;
 
 /** One reported step, as the table keeps it. */
@@ -128,6 +135,8 @@ export type FunnelSummary = FunnelCounts & {
   generatedAt: string;
   /** The first report ever kept, or null while there is none: before it, accounts are placed by the app's own data alone. */
   recordingSince: string | null;
+  /** True when a step is known only from reports, so since when they are kept matters. False when the app's own data shows every step. */
+  needsReports: boolean;
   /** More accounts in the stretch than one answer reads: the newest were kept. */
   truncated: boolean;
 };
@@ -185,7 +194,13 @@ export function buildFunnel(input: {
     for (const key of account.done) at = Math.max(at, index.get(key) ?? 0);
     for (const row of mine) if (row.ok) at = Math.max(at, index.get(row.step) ?? 0);
 
-    const wrong = mine.filter((row) => !row.ok && index.has(row.step));
+    // What went wrong: the failed reports and the failures the app's own data shows, oldest first.
+    const wrong = [
+      ...mine.filter((row) => !row.ok).map((row) => ({ step: row.step, reason: row.reason, at: row.occurredAt })),
+      ...account.problems,
+    ]
+      .filter((row) => index.has(row.step))
+      .sort((a, b) => a.at.localeCompare(b.at));
     for (const row of wrong) {
       const said = row.reason ?? 'No reason given';
       const key = `${row.step}\n${reasonGroup(said)}`;
@@ -194,6 +209,8 @@ export function buildFunnel(input: {
       problems.set(key, entry);
     }
     const last = wrong.at(-1);
+    const reported = mine.at(-1)?.occurredAt ?? null;
+    const lastSeenAt = reported && account.lastSeenAt ? (reported > account.lastSeenAt ? reported : account.lastSeenAt) : (reported ?? account.lastSeenAt);
     const signup = signupOf.get(account.id);
     const device: FunnelDevice =
       account.device ?? (funnelDevice(signup?.device) !== 'unknown' ? funnelDevice(signup?.device) : funnelDevice(mine.find((row) => row.device)?.device));
@@ -210,8 +227,8 @@ export function buildFunnel(input: {
       contact: account.contact,
       reached: bar.key,
       stopped: bar.stopped,
-      lastSeenAt: mine.at(-1)?.occurredAt ?? null,
-      problem: last ? { step: last.step, label: bars[index.get(last.step)!]!.label, reason: last.reason, at: last.occurredAt } : null,
+      lastSeenAt,
+      problem: last ? { step: last.step, label: bars[index.get(last.step)!]!.label, reason: last.reason, at: last.at } : null,
       at,
     });
   }

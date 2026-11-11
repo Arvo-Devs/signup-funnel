@@ -107,16 +107,21 @@ For each step, decide how the page will know it happened:
 | Happens on the server and leaves nothing behind (the email was confirmed, a link failed) | The app's server calls `recordStep()`. |
 | Is only something a screen saw (the welcome page was shown, a button was pressed, a window did not open) | The screen calls `noteStep()`, and the step is marked `fromBrowser`. |
 
-A step can be known both ways. A failure can only be reported: the app's own
-tables do not remember what did not happen.
+A step can be known both ways. Mark a step the app's own data shows with
+`fromData: true`: when every step is marked, no bar depends on reports, and
+the page does not say since when they are kept.
+
+A failure is reported, or read from the app's own data when its tables keep
+one (a sign-in link that failed, with the message the person saw): the
+accounts hook gives those in `problems`. Either way it moves nobody forward.
 
 ```ts
 // lib/funnel-steps.ts: an example
 export const STEPS = [
-  { key: "email_confirmed", label: "Confirmed the email" },
+  { key: "email_confirmed", label: "Confirmed the email", fromData: true },
   { key: "welcome_seen", label: "Saw the welcome page", fromBrowser: true },
-  { key: "key_made", label: "Made a key", stopped: "Made a key, never used it" },
-  { key: "first_request", label: "Sent a first request" }, // the goal
+  { key: "key_made", label: "Made a key", stopped: "Made a key, never used it", fromData: true },
+  { key: "first_request", label: "Sent a first request", fromData: true }, // the goal
 ] as const;
 ```
 
@@ -189,7 +194,15 @@ async function accounts({ from, to, limit }: { from: Date; to: Date; limit: numb
 
 An account can also carry `kind` ("Agency"), `device` (`"phone"` or
 `"computer"`), `source` ("Google Ads") and `contact` ("@handle"), when the app
-knows them. The full contract is `FunnelConfig` in `src/config.ts`.
+knows them, and two things its own tables may show:
+
+- `problems`: what went wrong, as `{ step, reason, at }` (a sign-in link
+  that failed, with the message the person saw). Counted with the reported
+  failures; the newest 20 per account are read.
+- `lastSeenAt`: when the app last saw the account (its last sign-in or
+  request). The stuck list shows the later of this and the last report.
+
+The full contract is `FunnelConfig` in `src/config.ts`.
 
 **3. One route file.**
 
@@ -272,7 +285,8 @@ marked `fromBrowser`, at most 60 in ten minutes per account.
 ## What it cannot know
 
 - **A step from before the package was installed**, unless the app's own
-  data shows it (`done`). The page says since when steps are reported.
+  data shows it (`done`). The page says since when steps are reported,
+  unless every step is marked `fromData`.
 - **More than 2,000 accounts in one answer.** A longer stretch keeps the
   newest 2,000 and says so. The stuck list shows the newest 300.
 - **Why someone left without an error.** The stuck list says where they
@@ -283,10 +297,11 @@ marked `fromBrowser`, at most 60 in ten minutes per account.
 - A row keeps the account's id, the step, whether it went through, one line
   of why not, and "phone", "tablet" or "computer". No name, no email, no
   address and no user agent.
-- Names and emails are never stored: the page reads them live through
-  `accounts`, so a deleted account is not on it.
-- `reason` is a line the app writes. Write what the person was told, never
-  what they typed: no email, password, key or token.
+- Names, emails and `problems` are never stored: the page reads them live
+  through `accounts`, so a deleted account is not on it.
+- `reason`, reported or in `problems`, is a line the app writes. Write what
+  the person was told, never what they typed: no email, password, key or
+  token.
 - Only people `canView` allows get any of it, the stuck list's contact
   details included.
 

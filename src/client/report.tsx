@@ -106,8 +106,9 @@ function ReportBody({ data, stretch }: { data: FunnelSummary; stretch: string })
   const asideTotal = data.setAside.reduce((sum, row) => sum + row.count, 0);
   const aside = data.setAside.length === 1 ? data.setAside[0]!.reason : data.setAside.map((row) => `${row.reason} ${formatNumber(row.count)}`).join(', ');
   const top = data.bars[0]?.count ?? 0;
-  // Steps reported before the package was installed do not exist: say since when.
+  // Steps reported before the package was installed do not exist: say since when, unless the app's own data shows every step.
   const late = data.recordingSince && Date.parse(data.recordingSince) > Date.parse(data.from) ? data.recordingSince : null;
+  const sinceNote = data.needsReports && (late || !data.recordingSince);
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
@@ -143,7 +144,7 @@ function ReportBody({ data, stretch }: { data: FunnelSummary; stretch: string })
                 </div>
               </div>
             ))}
-            {late || !data.recordingSince ? (
+            {sinceNote ? (
               <p className="text-xs leading-relaxed text-muted-foreground/80">
                 {late ? `Steps are reported since ${formatDate(late)}.` : 'No step has been reported yet.'} Accounts from before that are placed by what the app’s own data shows.
               </p>
@@ -183,7 +184,7 @@ function ReportBody({ data, stretch }: { data: FunnelSummary; stretch: string })
             <CardHeader title="What went wrong" description="The reasons a step failed, by how many people it happened to." />
             <CardBody>
               {data.problems.length === 0 ? (
-                <p className="text-[13px] text-muted-foreground">Nothing reported went wrong.</p>
+                <p className="text-[13px] text-muted-foreground">Nothing went wrong that the app knows of.</p>
               ) : (
                 <ul className="space-y-2">
                   {data.problems.map((row) => (

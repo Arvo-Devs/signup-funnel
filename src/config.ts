@@ -34,6 +34,23 @@ export type FunnelStepDef = Readonly<{
   stopped?: string;
   /** True when a signed-in browser may report it with noteStep(). Default false: only the app's server may, with recordStep(). */
   fromBrowser?: boolean;
+  /**
+   * True when the app's own data shows this step (the accounts hook lists it
+   * in `done`), so an account is placed right whether or not it was ever
+   * reported. When every step is, the page does not say since when steps
+   * are reported, since no bar depends on it. Default false.
+   */
+  fromData?: boolean;
+}>;
+
+/** Something that went wrong which the app's own data shows: a sign-in link that failed, say. */
+export type FunnelAccountProblem = Readonly<{
+  /** The step it belongs to, one of the app's step keys. */
+  step: string;
+  /** What the person was told, in one line. Never what they typed. */
+  reason: string;
+  /** When it happened: a Date or ISO 8601. */
+  at: Date | string;
 }>;
 
 /** An account made in the range, as the app knows it now. */
@@ -55,6 +72,14 @@ export type FunnelAccount = Readonly<{
   source?: string | null;
   /** How to reach them, when the sign-up asked for it ("@handle"). Only people who may see the page get it. */
   contact?: string | null;
+  /**
+   * What went wrong that the app's own data shows, when its tables keep
+   * failures (a sign-in link that failed). Counted with the reported ones
+   * and, like them, it moves nobody forward. The newest 20 are read.
+   */
+  problems?: readonly FunnelAccountProblem[] | null;
+  /** When the app last saw the account (its last sign-in or request). The page shows the later of this and the last report. */
+  lastSeenAt?: Date | string | null;
 }>;
 
 export type FunnelLog = (line: string, error?: unknown) => void;

@@ -233,6 +233,39 @@ describe.skipIf(!ROOT_URL)('sign-up funnel (pg)', () => {
     const { body } = await page();
     expect(body.recordingSince).toBeNull();
     expect(body.reachedGoal).toBe(1);
+    // The fake app's welcome page is known only from reports.
+    expect(body.needsReports).toBe(true);
+  });
+
+  test('the page: an app whose own data shows every step, its failures and when it last saw each account', async () => {
+    funnel = createSignupFunnel(
+      fakeConfig({
+        db: () => sql,
+        steps: [
+          { key: 'key_made', label: 'Made a key', fromData: true },
+          { key: 'account_linked', label: 'Linked an account', fromData: true },
+        ],
+        accounts: accountsHook([
+          account('tried', 2, {
+            done: ['key_made'],
+            lastSeenAt: new Date(Date.now() - 60_000),
+            problems: [
+              { step: 'account_linked', reason: 'The sign-in link expired', at: new Date(Date.now() - 2 * 60_000) },
+              { step: 'account_linked', reason: 'The creator’s sign-in failed', at: new Date(Date.now() - 3 * 60_000) },
+            ],
+          }),
+        ]),
+      }),
+    );
+    const { status, body } = await page();
+    expect(status).toBe(200);
+    expect(body.needsReports).toBe(false);
+    expect(body.stuck[0]).toMatchObject({ id: 'tried', reached: 'key_made', problem: { label: 'Linked an account', reason: 'The sign-in link expired' } });
+    expect(Date.parse(body.stuck[0]!.lastSeenAt!)).toBeGreaterThan(Date.now() - 2 * 60_000);
+    expect(body.problems.map((p) => [p.reason, p.people])).toEqual([
+      ['The creator’s sign-in failed', 1],
+      ['The sign-in link expired', 1],
+    ]);
   });
 
   test('the page: when the app cannot look its accounts up, it says so', async () => {

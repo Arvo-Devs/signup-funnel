@@ -117,6 +117,11 @@ describe('SignupFunnelReport', () => {
     expect(late).toContain(`Steps are reported since ${formatDate(since)}.`);
     expect(late).toContain('Accounts from before that are placed by what the app’s own data shows.');
     expect(seeded({ recordingSince: null })).toContain('No step has been reported yet.');
+    // An app whose own data shows every step: no bar depends on reports, so there is nothing to say.
+    const fromData = seeded({ recordingSince: null, needsReports: false });
+    expect(fromData).not.toContain('No step has been reported yet.');
+    expect(fromData).not.toContain('Accounts from before that');
+    expect(seeded({ recordingSince: since, needsReports: false })).not.toContain('Steps are reported since');
   });
 
   test('phone or computer: how many of each got to the goal', () => {
@@ -132,7 +137,7 @@ describe('SignupFunnelReport', () => {
     expect(card).toContain('1 That code has expired Confirmed the email');
     // Code 4013 is the same problem as 4012: one line, two people.
     expect(card).not.toContain('4013');
-    expect(seeded({ problems: [] })).toContain('Nothing reported went wrong.');
+    expect(seeded({ problems: [] })).toContain('Nothing went wrong that the app knows of.');
   });
 
   /** The stuck list's two drawings: the table (where six columns fit) and the blocks (where they do not). */

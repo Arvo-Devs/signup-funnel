@@ -20,6 +20,8 @@ export function sampleSummary(overrides: Partial<FunnelSummary> = {}, now: numbe
     device: null,
     source: null,
     contact: null,
+    problems: [],
+    lastSeenAt: null,
     ...extra,
   });
   const row = (userId: string, step: string, daysAgo: number, extra: Partial<FunnelStepRow> = {}): FunnelStepRow => ({
@@ -64,6 +66,7 @@ export function sampleSummary(overrides: Partial<FunnelSummary> = {}, now: numbe
     to: at(0),
     generatedAt: at(0),
     recordingSince: at(60),
+    needsReports: true,
     truncated: false,
     ...overrides,
   };

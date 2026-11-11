@@ -95,7 +95,7 @@ export function createSignupFunnel<User extends FunnelUser = FunnelUser>(input: 
   };
 }
 
-export type { FunnelAccount, FunnelConfig, FunnelLog, FunnelSql, FunnelStepDef, FunnelUser } from './config';
+export type { FunnelAccount, FunnelAccountProblem, FunnelConfig, FunnelLog, FunnelSql, FunnelStepDef, FunnelUser } from './config';
 export { stepsProblem } from './config';
 export type { FunnelBar, FunnelDevice, FunnelPerson, FunnelProblem, FunnelRange, FunnelSummary } from './shared/funnel';
 export { buildFunnel, MADE_KEY } from './shared/funnel';
