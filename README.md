@@ -25,6 +25,11 @@ Access, its steps and its accounts.
   done) or a step the app reported. A later step proves the earlier ones, so
   the bars only fall and accounts older than the reporting can still be
   placed.
+- **Says who went on without a step.** A step marked `fromData` is one the
+  app's own data answers, so it is never just assumed: when someone did a
+  later step without it (topped up before confirming the email, say), its
+  bar says how many went on without it and the stuck list says "Skipped:"
+  with the step. They stay placed where their proof puts them.
 - **Keeps what went wrong.** A step that failed is kept with one line of why
   ("The link window did not open"). It moves nobody forward, and it shows as
   the last thing that went wrong for that person and in a count of reasons by
@@ -34,9 +39,17 @@ Access, its steps and its accounts.
   first step reported. A tablet counts as a phone.
 - **Lists the people who are stuck**, newest first: who, when, where they
   stopped in the app's own words, what went wrong, where they came from and
-  how to reach them when the sign-up asked.
+  how to reach them when the sign-up asked. A column nobody in the list has
+  anything for is left out.
 - **Leaves out the accounts the app sets aside** (invited staff, test
   accounts), counted apart so the totals still add up.
+- **Side steps ("Also did").** Things people may do on the way that the
+  steps after them do not need (liking a post before voting): how many did
+  each, and how many of those got to the goal against everyone else. They
+  move nobody forward.
+- **More than one kind of sign-up.** An app whose fans and advertisers (say)
+  sign up for different things gives each kind its own steps, goal and
+  accounts, and the page has a switch between them.
 - **The Sign-up funnel page**: one sentence that says it all, a bar per step
   with how many dropped off before it, phone against computer, what went
   wrong, the stuck list, and accounts by where they came from.
@@ -99,6 +112,19 @@ of the app, and stop at the first thing that makes it one. That last thing is
 the goal. Four to seven steps reads well; a step nobody can fail at is not
 worth a bar.
 
+**A step is one the steps after it need.** The page counts a later step as
+proof of the earlier ones (nobody votes without a confirmed email, when the
+app asks for one), so a step people can skip on the way to the goal makes its
+bar wrong. Put those in `sideSteps` instead: on a site where voting needs a
+confirmed email but liking a post does not, "Confirmed the email" is a step
+and "Liked a post" is a side step. The page then shows how many liked
+something and how many of them voted, against everyone else.
+
+```ts
+// Side steps take the same keys, labels and fromData / fromBrowser as steps.
+export const SIDE_STEPS = [{ key: "liked", label: "Liked, saved or commented", fromData: true }] as const;
+```
+
 For each step, decide how the page will know it happened:
 
 | The step | How the page knows |
@@ -109,7 +135,13 @@ For each step, decide how the page will know it happened:
 
 A step can be known both ways. Mark a step the app's own data shows with
 `fromData: true`: when every step is marked, no bar depends on reports, and
-the page does not say since when they are kept.
+the page does not say since when they are kept. A `fromData` step is never
+assumed from a later one: someone the data says skipped it is counted under
+its bar as having gone on without it.
+
+Two steps the goal needs in either order (topping up and confirming the
+email, when a campaign needs both) both stay steps: list them in the order
+most people take, and the page shows who took the other.
 
 A failure is reported, or read from the app's own data when its tables keep
 one (a sign-in link that failed, with the message the person saw): the
@@ -131,8 +163,8 @@ is what the stuck list says for someone who got this far and no further
 (default: the label, then ", then nothing"). The account being made is always
 the first bar, so it is never in the list.
 
-A list that cannot work (no steps, a key used twice, a bad key) never breaks
-a sign-up: nothing is kept, the server log says what is wrong in one
+A list that cannot work (no steps, a key used twice, a bad key, a side step
+that is also a step) never breaks a sign-up: nothing is kept, the server log says what is wrong in one
 sentence, and so does the page. `stepsProblem(STEPS)` answers the same
 sentence, or `null`, for a test of your own:
 
@@ -141,11 +173,66 @@ import { stepsProblem } from "@arvo/signup-funnel";
 expect(stepsProblem(STEPS)).toBeNull();
 ```
 
+## More than one kind of sign-up
+
+Some apps sign up two kinds of people who want different things: fans who
+vote and advertisers who pay, or agencies and creators. One list of steps
+cannot hold both, so each kind gets its own, under `funnels`, in place of
+`steps` and `accounts`:
+
+```ts
+createSignupFunnel({
+  // db, signedInUser, canView, siteHosts, traffic: as for one kind
+  funnels: [
+    {
+      key: "fans",                  // in the page's address: ?funnel=fans
+      label: "Fans",                // on the switch
+      description: "Accounts made on the site.",
+      steps: FAN_STEPS,
+      sideSteps: FAN_SIDE_STEPS,
+      accounts: fanAccounts,        // only this kind's accounts
+    },
+    {
+      key: "advertisers",
+      label: "Advertisers",
+      description: "Accounts that use the advertiser dashboard.",
+      steps: ADVERTISER_STEPS,
+      accounts: advertiserAccounts,
+    },
+  ],
+});
+```
+
+- **The app decides who is which kind.** Each account should be in one
+  kind's `accounts` and no other, by a rule the app's own data can answer (a
+  flag on the account, where it was made). Say the rule in the kind's
+  `description`, so the page says who counts.
+- **An account that changes kind** (a fan who later starts advertising) moves
+  with the rule. Its sign-up time stays when the account was made: say so in
+  the description when it matters.
+- **The first kind is the one the page opens on.** Keys go in the address and
+  in shared links: never rename one. A link naming a kind that is gone opens
+  on the first.
+- **Two kinds may share a step key** ("email_confirmed"): it is the same step
+  for the same account, kept once in the one table.
+- **A second app on the same database** (an advertiser dashboard that signs
+  its users up itself) needs nothing installed: read its steps from the
+  shared tables in that kind's `accounts` hook. Install the package in the
+  one app whose Admin shows the page.
+- **Traffic's sign-up rows only cover sign-ups made where Traffic runs.** For
+  a kind that signs up somewhere else, give `device` from what the app has
+  (the browser of the account's first session, say: `deviceOf(userAgent)`
+  answers phone, computer or null), or the page says it is not recorded.
+- `funnelsProblem(FUNNELS)` answers what is wrong with the list, or `null`,
+  for a test of your own. At most six kinds fit the switch.
+
 ## Setting it up
 
 **1. The table.** Copy `migrations/0001_signup_funnel.sql` into your
 migrations. It makes `funnel_steps`. Never edit it in place; a later version
-adds new files.
+adds new files. Until it has run, the page still answers from the app's own
+data (nothing reported shows, and the server log says to run it), and
+`recordStep` keeps nothing: an app can ship the page before its migration.
 
 **2. One server file.** Lazy, so nothing connects at build time:
 

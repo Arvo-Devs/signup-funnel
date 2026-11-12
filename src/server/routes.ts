@@ -2,7 +2,7 @@
  * The funnel routes, mounted under basePath (default /api/signup-funnel) by
  * one catch-all route file in the app:
  *
- *   GET   ''      the page's numbers, for canView
+ *   GET   ''      the page's numbers for one kind of sign-up, for canView
  *   POST  'step'  a step the browser saw: signed in, from the site's own pages
  *
  * Anything else is not found. Every answer is no-store.
@@ -23,18 +23,25 @@ export type FunnelRouteHandlers = Readonly<{ GET: RouteHandler; POST: RouteHandl
 export function createRouteHandlers<User extends FunnelUser>(config: ResolvedFunnelConfig<User>): FunnelRouteHandlers {
   // A screen reports a handful of steps; anything near this is a loop or someone poking.
   const stepLimit = createPublicLimiter({ perSubject: 60, total: 5000, windowMs: TEN_MINUTES });
-  const fromBrowser = new Set(config.steps.filter((step) => step.fromBrowser).map((step) => step.key));
+  const fromBrowser = new Set(
+    config.funnels.flatMap((funnel) => [...funnel.steps, ...funnel.sideSteps]).filter((step) => step.fromBrowser).map((step) => step.key),
+  );
 
-  /** GET ?range=30d: what the Sign-up funnel page shows. */
+  /** GET ?range=30d&funnel=fans: what the Sign-up funnel page shows. A kind it does not know is the first one. */
   async function summary(request: Request): Promise<Response> {
     const ctx = await viewerContext(request, config);
     if (ctx instanceof Response) return ctx;
     // Said only to the people who may see the page: what to fix, in the app's code.
     if (config.problem) return apiError('internal', 'not_set_up', 'The sign-up funnel is not set up right, so no step is being kept.', { hint: config.problem });
-    const range = new URL(request.url).searchParams.get('range') ?? DEFAULT_FUNNEL_RANGE;
+    const params = new URL(request.url).searchParams;
+    const range = params.get('range') ?? DEFAULT_FUNNEL_RANGE;
     if (!isFunnelRange(range)) return apiError('invalid_request', 'invalid_parameter', 'Range must be 7d, 30d or 90d.', { param: 'range' });
+    // An old link can name a kind that has since gone: it opens on the first, which the answer names.
+    const asked = params.get('funnel');
+    const funnel = config.funnels.find((kind) => kind.key === asked) ?? config.funnels[0];
+    if (!funnel) return apiError('internal', 'not_set_up', 'The sign-up funnel is not set up right, so no step is being kept.');
     try {
-      const out = await funnelSummary(ctx.sql, config, range);
+      const out = await funnelSummary(ctx.sql, config, funnel, range);
       if (!out) {
         return apiError('internal', 'internal_error', 'The accounts could not be looked up right now.', { hint: 'Try again in a minute.' });
       }

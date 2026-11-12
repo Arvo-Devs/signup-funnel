@@ -6,14 +6,15 @@
 //
 // Server only: it uses Node's crypto. The page and the browser call are in
 // ./client and ./notes.
-import { normalizeConfig, type FunnelConfig, type FunnelUser } from './config';
+import { allStepKeys, normalizeConfig, type FunnelConfig, type FunnelUser } from './config';
 import { createRouteHandlers, type RouteHandler } from './server/routes';
 import { forgetSteps, insertStep, reportDevice } from './server/steps';
+import { deviceClass } from './shared/device';
 
 export type RecordStepInput = Readonly<{
   /** The account the step is for. */
   userId: string;
-  /** One of the app's step keys. */
+  /** One of the app's step or side step keys, from any of its kinds of sign-up. */
   step: string;
   /** False when the step went wrong; `reason` says how, in one line a person can read. Default true. */
   ok?: boolean;
@@ -53,7 +54,7 @@ export type SignupFunnel = Readonly<{
  */
 export function createSignupFunnel<User extends FunnelUser = FunnelUser>(input: FunnelConfig<User>): SignupFunnel {
   const config = normalizeConfig(input);
-  const known = new Set(config.steps.map((step) => step.key));
+  const known = allStepKeys(config);
   return {
     routeHandlers: createRouteHandlers(config),
     recordStep: async (step) => {
@@ -95,7 +96,29 @@ export function createSignupFunnel<User extends FunnelUser = FunnelUser>(input: 
   };
 }
 
-export type { FunnelAccount, FunnelAccountProblem, FunnelConfig, FunnelLog, FunnelSql, FunnelStepDef, FunnelUser } from './config';
-export { stepsProblem } from './config';
-export type { FunnelBar, FunnelDevice, FunnelPerson, FunnelProblem, FunnelRange, FunnelSummary } from './shared/funnel';
+export type {
+  FunnelAccount,
+  FunnelAccountProblem,
+  FunnelAccountsHook,
+  FunnelConfig,
+  FunnelDef,
+  FunnelLog,
+  FunnelSql,
+  FunnelStepDef,
+  FunnelUser,
+} from './config';
+export { funnelsProblem, stepsProblem } from './config';
+export type { FunnelBar, FunnelDevice, FunnelKind, FunnelPerson, FunnelProblem, FunnelRange, FunnelSideStep, FunnelSummary } from './shared/funnel';
 export { buildFunnel, MADE_KEY } from './shared/funnel';
+
+/**
+ * Phone or computer from a browser's user agent, for an app that gives
+ * `device` itself (the browser of an account's first session, say, for a
+ * kind of sign-up Traffic does not see). A tablet counts as a phone. Null
+ * when there is no user agent.
+ */
+export function deviceOf(userAgent: string | null | undefined): 'phone' | 'computer' | null {
+  const agent = typeof userAgent === 'string' ? userAgent.trim() : '';
+  if (!agent) return null;
+  return deviceClass(agent) === 'computer' ? 'computer' : 'phone';
+}

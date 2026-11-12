@@ -180,3 +180,40 @@ describe('a list of steps that cannot be used', () => {
     expect(response.status).toBe(400);
   });
 });
+
+describe('an app with several kinds of sign-up', () => {
+  const several = (log?: (line: string) => void) =>
+    funnel({
+      funnels: [
+        { key: 'fans', label: 'Fans', steps: [{ key: 'email_confirmed', label: 'Confirmed the email' }, { key: 'voted', label: 'Voted' }], sideSteps: [{ key: 'liked', label: 'Liked a post', fromBrowser: true }], accounts: async () => [] },
+        { key: 'advertisers', label: 'Advertisers', steps: [{ key: 'topped_up', label: 'Topped up', fromBrowser: true }, { key: 'campaign_started', label: 'Started a campaign' }], accounts: async () => [] },
+      ],
+      ...(log ? { log } : {}),
+    });
+
+  test('a page may report a step or side step any kind marked for pages, and nothing else', async () => {
+    const post = (step: unknown) => several().routeHandlers.POST(request('/api/signup-funnel/step', { cookie: cookieFor('owner'), body: { step } }));
+    // Marked for pages: past the check, to the missing database.
+    expect((await post('liked')).status).toBe(503);
+    expect((await post('topped_up')).status).toBe(503);
+    for (const step of ['voted', 'campaign_started', 'email_confirmed', 'nope']) expect((await post(step)).status).toBe(400);
+  });
+
+  test('recordStep knows every kind’s steps and side steps', async () => {
+    const logs: string[] = [];
+    const one = several((line) => logs.push(line));
+    for (const step of ['email_confirmed', 'voted', 'liked', 'topped_up', 'campaign_started']) {
+      expect(await one.recordStep({ userId: 'usr_owner', step })).toBe(false);
+    }
+    expect(logs).toEqual([]);
+    expect(await one.recordStep({ userId: 'usr_owner', step: 'key_made' })).toBe(false);
+    expect(logs.at(-1)).toContain('"key_made" is not one of this app\'s steps');
+  });
+
+  test('the page’s numbers still need Mass Access, whichever kind is asked for', async () => {
+    const get = (cookie?: string) => several().routeHandlers.GET(request('/api/signup-funnel?funnel=advertisers', { method: 'GET', cookie }));
+    expect((await get()).status).toBe(401);
+    expect((await get(cookieFor('owner'))).status).toBe(404);
+    expect((await get(cookieFor('admin'))).status).toBe(503);
+  });
+});

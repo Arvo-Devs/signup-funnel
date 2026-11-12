@@ -12,8 +12,9 @@ import { useFunnelBasePath } from './context';
 /** Every query this package keeps is under this key, then the base path. */
 export const FUNNEL_QUERY_KEY = ['arvo-signup-funnel'] as const;
 
-export function summaryKey(basePath: string, range: FunnelRange) {
-  return [...FUNNEL_QUERY_KEY, basePath, 'summary', range] as const;
+/** The key one answer is kept under. No kind named is the app's first kind (or its only one). */
+export function summaryKey(basePath: string, range: FunnelRange, funnel: string | null = null) {
+  return funnel ? ([...FUNNEL_QUERY_KEY, basePath, 'summary', range, funnel] as const) : ([...FUNNEL_QUERY_KEY, basePath, 'summary', range] as const);
 }
 
 async function call<T>(url: string, init: RequestInit = {}): Promise<T> {
@@ -29,12 +30,16 @@ async function call<T>(url: string, init: RequestInit = {}): Promise<T> {
   return body as T;
 }
 
-/** The page's numbers for one range. The last range's numbers stay up while a new one loads. */
-export function useFunnelSummary(range: FunnelRange) {
+/**
+ * The page's numbers for one range and one kind of sign-up (null: the first).
+ * The last numbers stay up while new ones load; the page says when they are
+ * another kind's, so they are never read as this one's.
+ */
+export function useFunnelSummary(range: FunnelRange, funnel: string | null = null) {
   const basePath = useFunnelBasePath();
   return useQuery<FunnelSummary, FunnelError>({
-    queryKey: summaryKey(basePath, range),
-    queryFn: ({ signal }) => call(`${basePath}?range=${range}`, { signal }),
+    queryKey: summaryKey(basePath, range, funnel),
+    queryFn: ({ signal }) => call(`${basePath}?range=${range}${funnel ? `&funnel=${encodeURIComponent(funnel)}` : ''}`, { signal }),
     placeholderData: (previous) => previous,
   });
 }

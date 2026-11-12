@@ -5,7 +5,8 @@
  * must look like.
  */
 import { describe, expect, test } from 'bun:test';
-import { normalizeConfig, stepsProblem } from '../src/config';
+import { funnelsProblem, normalizeConfig, stepsProblem, type FunnelDef } from '../src/config';
+import { deviceOf } from '../src/index';
 import { cleanReason, onceKeyFor } from '../src/server/steps';
 import { accountFacts } from '../src/server/summary';
 import { buildFunnel, funnelDevice, isFunnelRange, MADE_KEY, reasonGroup, type FunnelAccountFacts, type FunnelStepRow } from '../src/shared/funnel';
@@ -319,7 +320,7 @@ describe('the app’s list of steps', () => {
     const logs: string[] = [];
     const config = normalizeConfig(fakeConfig({ steps: [{ key: 'a', label: 'A' }, { key: 'a', label: 'B' }], log: (line) => logs.push(line) }));
     expect(config.problem).toBe('Two steps share the key a.');
-    expect(config.steps).toEqual([]);
+    expect(config.funnels).toEqual([]);
     expect(logs).toEqual(['[Sign-up funnel] The list of steps cannot be used, so no step is kept until it is fixed. Two steps share the key a.']);
     // A list that is not a list at all, as untyped code could pass.
     expect(normalizeConfig(fakeConfig({ steps: undefined as never, log: () => undefined })).problem).toContain('at least one step');
@@ -332,5 +333,158 @@ describe('the app’s list of steps', () => {
     expect(config.basePath).toBe('/api/funnel');
     expect(config.traffic).toBe(false);
     expect(normalizeConfig(fakeConfig()).basePath).toBe('/api/signup-funnel');
+  });
+});
+
+describe('side steps', () => {
+  const SIDES = [
+    { key: 'liked', label: 'Liked a post' },
+    { key: 'alerts_on', label: 'Turned on alerts' },
+  ];
+  const out = buildFunnel({
+    steps: STEPS,
+    sideSteps: SIDES,
+    accounts: [
+      facts('goal_and_liked', { done: ['account_linked', 'liked'] }),
+      facts('liked_only', { done: ['liked'] }),
+      facts('liked_by_report'),
+      facts('confirmed', { done: ['email_confirmed'] }),
+      facts('aside', { done: ['liked'], setAside: 'Test account' }),
+    ],
+    rows: [
+      row('liked_by_report', 'liked', 1),
+      row('confirmed', 'alerts_on', 2, { ok: false, reason: 'The alert email bounced' }),
+    ],
+  });
+
+  test('counted for whoever did them, from the app’s data or a report, with how many of those got to the goal', () => {
+    expect(out.sideSteps).toEqual([
+      { key: 'liked', label: 'Liked a post', accounts: 3, reachedGoal: 1 },
+      { key: 'alerts_on', label: 'Turned on alerts', accounts: 0, reachedGoal: 0 },
+    ]);
+  });
+
+  test('they move nobody forward', () => {
+    expect(out.bars.map((bar) => bar.count)).toEqual([4, 2, 1, 1, 1]);
+    expect(out.stuck.find((p) => p.id === 'liked_only')?.reached).toBe(MADE_KEY);
+    expect(out.stuck.find((p) => p.id === 'liked_by_report')?.reached).toBe(MADE_KEY);
+  });
+
+  test('one that went wrong is what went wrong, under its own label', () => {
+    expect(out.problems).toEqual([{ step: 'alerts_on', label: 'Turned on alerts', reason: 'The alert email bounced', people: 1 }]);
+    expect(out.stuck.find((p) => p.id === 'confirmed')?.problem).toMatchObject({ step: 'alerts_on', label: 'Turned on alerts' });
+  });
+
+  test('an app with none has an empty list, and a side step with a step’s key is that step', () => {
+    expect(buildFunnel({ steps: STEPS, accounts: [facts('a')], rows: [] }).sideSteps).toEqual([]);
+    const clash = buildFunnel({ steps: STEPS, sideSteps: [{ key: 'key_made', label: 'Made a key on the side' }], accounts: [facts('a', { done: ['key_made'] })], rows: [] });
+    expect(clash.sideSteps).toEqual([]);
+    expect(clash.bars.find((bar) => bar.key === 'key_made')?.count).toBe(1);
+  });
+
+  test('an account’s own data may name side steps, and anything else it names is dropped', () => {
+    const keys = new Set(['email_confirmed', 'liked']);
+    expect(accountFacts({ id: 'a', createdAt: '2026-11-05T10:00:00.000Z', done: ['liked', 'nope', 'email_confirmed'] }, keys)?.done).toEqual(['liked', 'email_confirmed']);
+  });
+});
+
+describe('an app with several kinds of sign-up', () => {
+  const hook = async () => [];
+  const FANS: FunnelDef = { key: 'fans', label: 'Fans', description: '  Accounts made on the site  ', steps: [{ key: 'email_confirmed', label: ' Confirmed the email ' }, { key: 'voted', label: 'Voted' }], sideSteps: [{ key: 'liked', label: 'Liked a post' }], accounts: hook };
+  const ADS: FunnelDef = { key: 'advertisers', label: 'Advertisers', steps: [{ key: 'email_confirmed', label: 'Confirmed the email' }, { key: 'topped_up', label: 'Topped up' }], accounts: hook };
+
+  test('a good list, and two kinds may share a step', () => {
+    expect(funnelsProblem([FANS, ADS])).toBeNull();
+  });
+
+  test('what is wrong with a bad one, in words, naming the kind', () => {
+    expect(funnelsProblem([])).toContain('at least one kind');
+    expect(funnelsProblem(Array.from({ length: 7 }, (_, i) => ({ ...ADS, key: `k${i}` })))).toContain('At most 6');
+    expect(funnelsProblem([{ ...FANS, key: 'Fans' }])).toContain('lower case');
+    expect(funnelsProblem([FANS, { ...ADS, key: 'fans' }])).toContain('share the key fans');
+    expect(funnelsProblem([{ ...FANS, label: ' ' }])).toContain('needs a label');
+    expect(funnelsProblem([{ ...FANS, accounts: undefined as never }])).toContain('needs an accounts hook');
+    expect(funnelsProblem([FANS, { ...ADS, steps: [] }])).toBe('Advertisers: Give at least one step: the last one is the goal.');
+    expect(funnelsProblem([{ ...FANS, sideSteps: [{ key: 'voted', label: 'Voted again' }] }])).toBe('Fans: voted is a step and a side step: it can only be one.');
+    expect(funnelsProblem([{ ...FANS, sideSteps: [{ key: 'liked', label: 'A' }, { key: 'liked', label: 'B' }] }])).toContain('Two side steps share the key liked');
+    expect(funnelsProblem([{ ...FANS, sideSteps: [{ key: MADE_KEY, label: 'Made' }] }])).toContain('cannot be a side step');
+  });
+
+  test('read once: each kind in its order, labels and descriptions trimmed, no description when it is blank', () => {
+    const config = normalizeConfig(fakeConfig({ funnels: [FANS, ADS] }));
+    expect(config.problem).toBeNull();
+    expect(config.funnels.map((funnel) => [funnel.key, funnel.label, funnel.description])).toEqual([
+      ['fans', 'Fans', 'Accounts made on the site'],
+      ['advertisers', 'Advertisers', null],
+    ]);
+    expect(config.funnels[0]?.steps[0]?.label).toBe('Confirmed the email');
+    expect(config.funnels[0]?.sideSteps.map((step) => step.key)).toEqual(['liked']);
+    expect(config.funnels[1]?.sideSteps).toEqual([]);
+  });
+
+  test('an app with one kind is a list of one, under a key the page never shows', () => {
+    const config = normalizeConfig(fakeConfig({ sideSteps: [{ key: 'liked', label: 'Liked a post' }] }));
+    expect(config.funnels.map((funnel) => [funnel.key, funnel.label, funnel.steps.length, funnel.sideSteps.length])).toEqual([['signups', 'Sign-ups', STEPS.length, 1]]);
+    expect(normalizeConfig(fakeConfig({ sideSteps: [{ key: 'key_made', label: 'Made a key' }], log: () => undefined })).problem).toContain('a step and a side step');
+  });
+
+  test('steps and funnels both, or a bad kind: never thrown, logged once, read as nothing to keep', () => {
+    const logs: string[] = [];
+    const both = normalizeConfig({ ...fakeConfig({ funnels: [FANS], log: (line) => logs.push(line) }), steps: STEPS } as never);
+    expect(both.problem).toBe('Give either steps and accounts, or funnels: not both.');
+    expect(both.funnels).toEqual([]);
+    expect(logs).toHaveLength(1);
+    expect(normalizeConfig(fakeConfig({ funnels: [{ ...FANS, key: '' }], log: () => undefined })).funnels).toEqual([]);
+    expect(normalizeConfig(fakeConfig({ funnels: 'nope' as never, log: () => undefined })).problem).toContain('at least one kind');
+  });
+});
+
+describe('steps people went on without', () => {
+  // The fake app's welcome page is only known from reports; mark the rest as the app's own data, as an app that reads its tables would.
+  const DATA_STEPS = STEPS.map((step) => (step.key === 'welcome_seen' ? step : { ...step, fromData: true }));
+  const out = buildFunnel({
+    steps: DATA_STEPS,
+    accounts: [
+      facts('in_order', { done: ['email_confirmed', 'key_made'] }),
+      facts('no_email', { done: ['key_made'] }),
+      facts('no_email_goal', { done: ['account_linked'] }),
+      facts('reported_email', { done: ['key_made'] }),
+    ],
+    rows: [row('reported_email', 'email_confirmed', 1), row('in_order', 'welcome_seen', 2)],
+  });
+
+  test('they stay placed by their proof, and each bar counts who went on without it', () => {
+    expect(out.bars.map((bar) => [bar.key, bar.count, bar.skipped])).toEqual([
+      ['account_made', 4, 0],
+      ['email_confirmed', 4, 2],
+      // Only known from reports, so a later step proves it: never skipped.
+      ['welcome_seen', 4, 0],
+      ['key_made', 4, 1],
+      ['account_linked', 1, 0],
+    ]);
+  });
+
+  test('the stuck list names the steps each one went on without', () => {
+    expect(Object.fromEntries(out.stuck.map((p) => [p.id, p.skipped]))).toEqual({
+      in_order: [],
+      no_email: ['Confirmed the email'],
+      reported_email: [],
+    });
+    expect(out.reachedGoal).toBe(1);
+  });
+
+  test('an app that marks no step as its own data skips nothing', () => {
+    const plain = buildFunnel({ steps: STEPS, accounts: [facts('a', { done: ['account_linked'] })], rows: [] });
+    expect(plain.bars.every((bar) => bar.skipped === 0)).toBe(true);
+  });
+});
+
+describe('deviceOf, for an app that gives the device itself', () => {
+  test('phone or computer from a user agent; a tablet is a phone; nothing is null', () => {
+    expect(deviceOf('Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148')).toBe('phone');
+    expect(deviceOf('Mozilla/5.0 (iPad; CPU OS 17_6 like Mac OS X) AppleWebKit/605.1.15')).toBe('phone');
+    expect(deviceOf('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/129.0.0.0 Safari/537.36')).toBe('computer');
+    expect(deviceOf('')).toBeNull();
+    expect(deviceOf(null)).toBeNull();
   });
 });

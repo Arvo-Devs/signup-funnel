@@ -1,7 +1,8 @@
-// What the Sign-up funnel page shows for one stretch of time: the accounts
-// the app says were made in it, the steps kept for them, Traffic's sign-up
-// rows when the app has Traffic, and the rules in ../shared/funnel.
-import type { FunnelAccount, FunnelSql, FunnelUser, ResolvedFunnelConfig } from '../config';
+// What the Sign-up funnel page shows for one kind of sign-up and one stretch
+// of time: the accounts the app says were made in it, the steps kept for
+// them, Traffic's sign-up rows when the app has Traffic, and the rules in
+// ../shared/funnel.
+import type { FunnelAccount, FunnelSql, FunnelUser, ResolvedFunnel, ResolvedFunnelConfig } from '../config';
 import {
   buildFunnel,
   FUNNEL_ACCOUNTS_MAX,
@@ -14,6 +15,9 @@ import {
 import { cleanReason, recordingSince, stepsFor, trafficSignups } from './steps';
 
 const DAY = 24 * 60 * 60 * 1000;
+
+/** Postgres saying a table does not exist (42P01). */
+const noTable = (error: unknown) => typeof error === 'object' && error !== null && (error as { code?: unknown }).code === '42P01';
 /** Failures read per account from the app's own data: the newest. */
 const PROBLEMS_PER_ACCOUNT = 20;
 
@@ -62,26 +66,36 @@ export function accountFacts(account: FunnelAccount, stepKeys: ReadonlySet<strin
 }
 
 /**
- * The page's numbers for accounts made in the last `range`, or null when the
- * app could not look its accounts up right now.
+ * The page's numbers for one kind of sign-up's accounts made in the last
+ * `range`, or null when the app could not look its accounts up right now.
  */
 export async function funnelSummary<User extends FunnelUser>(
   sql: FunnelSql,
   config: ResolvedFunnelConfig<User>,
+  funnel: ResolvedFunnel,
   range: FunnelRange,
   now: Date = new Date(),
 ): Promise<FunnelSummary | null> {
   const from = new Date(now.getTime() - FUNNEL_RANGE_DAYS[range] * DAY);
-  const found = await config.accounts({ from, to: now, limit: FUNNEL_ACCOUNTS_MAX + 1 });
+  const found = await funnel.accounts({ from, to: now, limit: FUNNEL_ACCOUNTS_MAX + 1 });
   if (found === null) return null;
-  const stepKeys = new Set(config.steps.map((step) => step.key));
+  const stepKeys = new Set([...funnel.steps, ...funnel.sideSteps].map((step) => step.key));
   const accounts = found
     .slice(0, FUNNEL_ACCOUNTS_MAX)
     .map((account) => accountFacts(account, stepKeys))
     .filter((account): account is FunnelAccountFacts => account !== null);
   const ids = accounts.filter((account) => !account.setAside).map((account) => account.id);
 
-  const rows = ids.length ? await stepsFor(sql, ids) : [];
+  // Before the app has run the package's migration, its own data still places everyone: the page answers with no reports.
+  let rows: Awaited<ReturnType<typeof stepsFor>> = [];
+  let since: string | null = null;
+  try {
+    rows = ids.length ? await stepsFor(sql, ids) : [];
+    since = await recordingSince(sql);
+  } catch (error) {
+    if (!noTable(error)) throw error;
+    config.log('[Sign-up funnel] the funnel_steps table is not there yet: run the migration (migrations/), until then nothing reported is shown', error);
+  }
   let signups: FunnelSignupFact[] = [];
   if (config.traffic && ids.length) {
     try {
@@ -93,13 +107,15 @@ export async function funnelSummary<User extends FunnelUser>(
   }
 
   return {
+    funnel: { key: funnel.key, label: funnel.label, description: funnel.description },
+    funnels: config.funnels.map(({ key, label }) => ({ key, label })),
     range,
     from: from.toISOString(),
     to: now.toISOString(),
     generatedAt: now.toISOString(),
-    ...buildFunnel({ steps: config.steps, accounts, rows, signups }),
-    recordingSince: await recordingSince(sql),
-    needsReports: config.steps.some((step) => step.fromData !== true),
+    ...buildFunnel({ steps: funnel.steps, sideSteps: funnel.sideSteps, accounts, rows, signups }),
+    recordingSince: since,
+    needsReports: [...funnel.steps, ...funnel.sideSteps].some((step) => step.fromData !== true),
     truncated: found.length > FUNNEL_ACCOUNTS_MAX,
   };
 }

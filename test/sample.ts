@@ -60,6 +60,8 @@ export function sampleSummary(overrides: Partial<FunnelSummary> = {}, now: numbe
   ];
 
   return {
+    funnel: { key: 'signups', label: 'Sign-ups', description: null },
+    funnels: [{ key: 'signups', label: 'Sign-ups' }],
     ...buildFunnel({ steps: STEPS, accounts, rows }),
     range: '30d',
     from: at(30),

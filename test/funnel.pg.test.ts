@@ -268,6 +268,77 @@ describe.skipIf(!ROOT_URL)('sign-up funnel (pg)', () => {
     ]);
   });
 
+  test('an app with two kinds of sign-up: each kind its own accounts, steps and side steps, one table for both', async () => {
+    const fans = [account('fan_new', 1), account('fan_voted', 2, { done: ['email_confirmed', 'voted', 'liked'] }), account('fan_liked', 3, { done: ['liked'] })];
+    const ads = [account('ad_new', 1), account('ad_paid', 2, { done: ['email_confirmed', 'topped_up'], problems: [{ step: 'topped_up', reason: 'The payment expired before it was paid', at: new Date() }] })];
+    funnel = createSignupFunnel(
+      fakeConfig({
+        db: () => sql,
+        log: (line) => logs.push(line),
+        funnels: [
+          {
+            key: 'fans',
+            label: 'Fans',
+            description: 'Accounts made on the site',
+            steps: [{ key: 'email_confirmed', label: 'Confirmed the email', fromData: true }, { key: 'voted', label: 'Voted', fromData: true }],
+            sideSteps: [{ key: 'liked', label: 'Liked a post', fromData: true }],
+            accounts: accountsHook(fans),
+          },
+          {
+            key: 'advertisers',
+            label: 'Advertisers',
+            steps: [{ key: 'email_confirmed', label: 'Confirmed the email', fromData: true }, { key: 'topped_up', label: 'Topped up' }, { key: 'campaign_started', label: 'Started a campaign', fromData: true }],
+            accounts: accountsHook(ads),
+          },
+        ],
+      }),
+    );
+    // A step kept by the app's own code, for the second kind.
+    expect(await funnel.recordStep({ userId: 'ad_new', step: 'topped_up' })).toBe(true);
+
+    const first = await page();
+    expect(first.status).toBe(200);
+    expect(first.body.funnel).toEqual({ key: 'fans', label: 'Fans', description: 'Accounts made on the site' });
+    expect(first.body.funnels).toEqual([
+      { key: 'fans', label: 'Fans' },
+      { key: 'advertisers', label: 'Advertisers' },
+    ]);
+    expect(first.body).toMatchObject({ accounts: 3, counted: 3, reachedGoal: 1, needsReports: false });
+    expect(first.body.bars.map((bar) => [bar.key, bar.count])).toEqual([
+      ['account_made', 3],
+      ['email_confirmed', 1],
+      ['voted', 1],
+    ]);
+    expect(first.body.sideSteps).toEqual([{ key: 'liked', label: 'Liked a post', accounts: 2, reachedGoal: 1 }]);
+
+    const second = await page('?funnel=advertisers&range=7d');
+    expect(second.body.funnel.key).toBe('advertisers');
+    expect(second.body).toMatchObject({ range: '7d', accounts: 2, counted: 2, reachedGoal: 0, needsReports: true, sideSteps: [] });
+    expect(second.body.bars.map((bar) => [bar.key, bar.count])).toEqual([
+      ['account_made', 2],
+      ['email_confirmed', 2],
+      ['topped_up', 2],
+      ['campaign_started', 0],
+    ]);
+    expect(second.body.problems).toEqual([{ step: 'topped_up', label: 'Topped up', reason: 'The payment expired before it was paid', people: 1 }]);
+
+    // A kind the app does not have, as an old link could name: the first.
+    expect((await page('?funnel=creators')).body.funnel.key).toBe('fans');
+  });
+
+  test('before the app has run the migration: the page answers from the app’s own data, and the log says what to run', async () => {
+    accounts = [account('linked', 2, { done: ['email_confirmed', 'key_made', 'account_linked'] }), account('fresh', 1)];
+    await sql`alter table funnel_steps rename to funnel_steps_away`;
+    try {
+      const { status, body } = await page();
+      expect(status).toBe(200);
+      expect(body).toMatchObject({ accounts: 2, reachedGoal: 1, recordingSince: null });
+      expect(logs.some((line) => line.includes('the funnel_steps table is not there yet'))).toBe(true);
+    } finally {
+      await sql`alter table if exists funnel_steps_away rename to funnel_steps`;
+    }
+  });
+
   test('the page: when the app cannot look its accounts up, it says so', async () => {
     lookupDown = true;
     const { status, body } = await page();

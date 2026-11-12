@@ -8,6 +8,11 @@
 //                 the earlier ones (nobody reaches the goal without the steps
 //                 before it), which keeps the bars falling and lets accounts
 //                 older than the reporting still be placed
+//   skipped       a step the app's own data shows (fromData) that it says
+//                 was not done by someone placed past it: they went on
+//                 without it (topped up before confirming the email, say).
+//                 They stay placed where their proof puts them; the bar
+//                 counts them and the stuck list names the step
 //   went wrong    the last report that did not go through, or the last
 //                 failure the app's own data shows, whichever step it was
 //                 for. It does not move the account forward
@@ -16,6 +21,10 @@
 //   phone or      what the app gave, else Traffic's sign-up row, else the
 //   computer      first report; a tablet counts as a phone (it cannot install
 //                 a desktop app either)
+//   side steps    things done on the way that the steps after them do not
+//                 need (liking a post before voting): counted for whoever
+//                 did them, with how many of those reached the goal, and
+//                 never moving anyone forward
 //
 // The rules come from OFManager's sign-up funnel (2026-11-10), where they
 // were first worked out against real sign-ups.
@@ -44,7 +53,7 @@ const SOURCES_MAX = 50;
 
 export type FunnelDevice = 'phone' | 'computer' | 'unknown';
 
-export type FunnelStep = Readonly<{ key: string; label: string; stopped?: string }>;
+export type FunnelStep = Readonly<{ key: string; label: string; stopped?: string; fromData?: boolean }>;
 
 /** An account as the reducer takes it: the app's answer, with the time as ISO text. */
 export type FunnelAccountFacts = Readonly<{
@@ -84,12 +93,17 @@ export type FunnelBar = {
   count: number;
   /** How many reached the bar before and not this one. */
   dropped: number;
+  /** Of those placed here or further, how many the app's own data says never did this step: they went on without it. */
+  skipped: number;
   phone: number;
   computer: number;
   unknown: number;
 };
 
 export type FunnelProblem = { step: string; label: string; reason: string | null; at: string };
+
+/** A side step: how many counted accounts did it, and how many of those reached the goal. */
+export type FunnelSideStep = { key: string; label: string; accounts: number; reachedGoal: number };
 
 export type FunnelPerson = {
   id: string;
@@ -107,6 +121,8 @@ export type FunnelPerson = {
   /** The last report of any kind. */
   lastSeenAt: string | null;
   problem: FunnelProblem | null;
+  /** Steps before where they stopped that the app's own data says they never did, by label. */
+  skipped: string[];
 };
 
 export type FunnelCounts = {
@@ -121,6 +137,8 @@ export type FunnelCounts = {
   bars: FunnelBar[];
   devices: { device: 'phone' | 'computer'; accounts: number; reachedGoal: number }[];
   sources: { source: string; accounts: number; reachedGoal: number }[];
+  /** The app's side steps in its order: things done on the way that are not steps. Empty when it has none. */
+  sideSteps: FunnelSideStep[];
   /** What went wrong, by how many people it happened to. */
   problems: { step: string; label: string; reason: string; people: number }[];
   /** Counted accounts that have not reached the goal, newest first. */
@@ -128,7 +146,14 @@ export type FunnelCounts = {
   stuckTotal: number;
 };
 
+/** A kind of sign-up as the page's switch names it. */
+export type FunnelKind = { key: string; label: string; description: string | null };
+
 export type FunnelSummary = FunnelCounts & {
+  /** The kind of sign-up these numbers are for. */
+  funnel: FunnelKind;
+  /** Every kind the app has, in its order: the page shows a switch when there are two or more. */
+  funnels: { key: string; label: string }[];
   range: FunnelRange;
   from: string;
   to: string;
@@ -159,17 +184,23 @@ export function reasonGroup(reason: string): string {
 
 export function buildFunnel(input: {
   steps: readonly FunnelStep[];
+  sideSteps?: readonly FunnelStep[];
   accounts: readonly FunnelAccountFacts[];
   rows: readonly FunnelStepRow[];
   signups?: readonly FunnelSignupFact[];
 }): FunnelCounts {
-  const bars: { key: string; label: string; stopped: string }[] = [
-    { key: MADE_KEY, label: MADE_LABEL, stopped: MADE_STOPPED },
-    ...input.steps.map((step) => ({ key: step.key, label: step.label, stopped: step.stopped ?? `${step.label}, then nothing` })),
+  const bars: { key: string; label: string; stopped: string; fromData: boolean }[] = [
+    { key: MADE_KEY, label: MADE_LABEL, stopped: MADE_STOPPED, fromData: false },
+    ...input.steps.map((step) => ({ key: step.key, label: step.label, stopped: step.stopped ?? `${step.label}, then nothing`, fromData: step.fromData === true })),
   ];
   const index = new Map(bars.map((bar, i) => [bar.key, i]));
   const goalIndex = bars.length - 1;
   const goal = bars[goalIndex]!;
+  // A side step with the key of a step is that step: the step wins.
+  const sides = (input.sideSteps ?? []).filter((step) => !index.has(step.key) && step.key !== MADE_KEY);
+  const sideKeys = new Set(sides.map((step) => step.key));
+  /** What a step or side step is called, for what went wrong. */
+  const labelOf = new Map<string, string>([...sides.map((step) => [step.key, step.label] as const), ...bars.map((bar) => [bar.key, bar.label] as const)]);
 
   const rowsOf = new Map<string, FunnelStepRow[]>();
   for (const row of input.rows) {
@@ -180,7 +211,7 @@ export function buildFunnel(input: {
   const signupOf = new Map((input.signups ?? []).map((fact) => [fact.userId, fact]));
 
   const aside = new Map<string, number>();
-  const people: (FunnelPerson & { at: number })[] = [];
+  const people: (FunnelPerson & { at: number; sides: Set<string>; skippedKeys: Set<string> })[] = [];
   const problems = new Map<string, { step: string; label: string; reason: string; people: Set<string> }>();
 
   for (const account of input.accounts) {
@@ -193,18 +224,25 @@ export function buildFunnel(input: {
     let at = 0;
     for (const key of account.done) at = Math.max(at, index.get(key) ?? 0);
     for (const row of mine) if (row.ok) at = Math.max(at, index.get(row.step) ?? 0);
+    // A step the app's own data shows, before where they are placed, that it says they never did.
+    const own = new Set<string>([...account.done, ...mine.filter((row) => row.ok).map((row) => row.step)]);
+    const skippedKeys = new Set(bars.slice(1, at).filter((bar) => bar.fromData && !own.has(bar.key)).map((bar) => bar.key));
+    // Side steps move nobody: they are only counted for whoever did them.
+    const sidesDone = new Set<string>();
+    for (const key of account.done) if (sideKeys.has(key)) sidesDone.add(key);
+    for (const row of mine) if (row.ok && sideKeys.has(row.step)) sidesDone.add(row.step);
 
     // What went wrong: the failed reports and the failures the app's own data shows, oldest first.
     const wrong = [
       ...mine.filter((row) => !row.ok).map((row) => ({ step: row.step, reason: row.reason, at: row.occurredAt })),
       ...account.problems,
     ]
-      .filter((row) => index.has(row.step))
+      .filter((row) => labelOf.has(row.step))
       .sort((a, b) => a.at.localeCompare(b.at));
     for (const row of wrong) {
       const said = row.reason ?? 'No reason given';
       const key = `${row.step}\n${reasonGroup(said)}`;
-      const entry = problems.get(key) ?? { step: row.step, label: bars[index.get(row.step)!]!.label, reason: said, people: new Set<string>() };
+      const entry = problems.get(key) ?? { step: row.step, label: labelOf.get(row.step)!, reason: said, people: new Set<string>() };
       entry.people.add(account.id);
       problems.set(key, entry);
     }
@@ -228,8 +266,11 @@ export function buildFunnel(input: {
       reached: bar.key,
       stopped: bar.stopped,
       lastSeenAt,
-      problem: last ? { step: last.step, label: bars[index.get(last.step)!]!.label, reason: last.reason, at: last.at } : null,
+      problem: last ? { step: last.step, label: labelOf.get(last.step)!, reason: last.reason, at: last.at } : null,
+      skipped: bars.filter((b) => skippedKeys.has(b.key)).map((b) => b.label),
       at,
+      sides: sidesDone,
+      skippedKeys,
     });
   }
 
@@ -237,7 +278,16 @@ export function buildFunnel(input: {
     const reached = people.filter((p) => p.at >= i);
     const before = i === 0 ? reached.length : people.filter((p) => p.at >= i - 1).length;
     const of = (device: FunnelDevice) => reached.filter((p) => p.device === device).length;
-    return { key: bar.key, label: bar.label, count: reached.length, dropped: before - reached.length, phone: of('phone'), computer: of('computer'), unknown: of('unknown') };
+    return {
+      key: bar.key,
+      label: bar.label,
+      count: reached.length,
+      dropped: before - reached.length,
+      skipped: reached.filter((p) => p.skippedKeys.has(bar.key)).length,
+      phone: of('phone'),
+      computer: of('computer'),
+      unknown: of('unknown'),
+    };
   });
 
   const bySource = new Map<string, { source: string; accounts: number; reachedGoal: number }>();
@@ -250,7 +300,7 @@ export function buildFunnel(input: {
   }
 
   const stuck = people.filter((p) => p.at < goalIndex).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  const strip = ({ at: _at, ...person }: FunnelPerson & { at: number }): FunnelPerson => person;
+  const strip = ({ at: _at, sides: _sides, skippedKeys: _skipped, ...person }: FunnelPerson & { at: number; sides: Set<string>; skippedKeys: Set<string> }): FunnelPerson => person;
 
   return {
     accounts: input.accounts.length,
@@ -264,6 +314,10 @@ export function buildFunnel(input: {
       return { device, accounts: group.length, reachedGoal: group.filter((p) => p.at >= goalIndex).length };
     }),
     sources: [...bySource.values()].sort((a, b) => b.accounts - a.accounts || b.reachedGoal - a.reachedGoal || a.source.localeCompare(b.source)).slice(0, SOURCES_MAX),
+    sideSteps: sides.map((step) => {
+      const did = people.filter((p) => p.sides.has(step.key));
+      return { key: step.key, label: step.label, accounts: did.length, reachedGoal: did.filter((p) => p.at >= goalIndex).length };
+    }),
     problems: [...problems.values()]
       .map((entry) => ({ step: entry.step, label: entry.label, reason: entry.reason, people: entry.people.size }))
       .sort((a, b) => b.people - a.people || a.reason.localeCompare(b.reason))

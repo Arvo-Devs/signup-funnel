@@ -6,6 +6,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { SearchParamsContext } from 'next/dist/shared/lib/hooks-client-context.shared-runtime';
 import { renderToString } from 'react-dom/server';
 import { SignupFunnelReport, SignupFunnelSkeleton } from '../src/client';
 import { summaryKey } from '../src/client/api';
@@ -198,6 +199,21 @@ describe('SignupFunnelReport', () => {
     expect([...table.matchAll(/<th /g)]).toHaveLength(5);
   });
 
+  test('stuck sign-ups: a kind no source is known for has no Came from column, and what went wrong gets its room', () => {
+    const sample = sampleSummary();
+    const noSource = seeded({ stuck: sample.stuck.map((person) => ({ ...person, source: null })), sources: [] });
+    const { table, list } = stuckParts(noSource);
+    expect(table).not.toContain('Came from');
+    expect(list).not.toContain('Came from');
+    expect(table).toContain('w-[30%] min-w-44');
+    const rows = [...table.matchAll(/<tr [^>]*>([\s\S]*?)<\/tr>/g)].map((m) => [...m[1]!.matchAll(/<td /g)].length);
+    expect(new Set(rows)).toEqual(new Set([5]));
+    // Neither: what went wrong takes both columns' room.
+    const neither = stuckParts(seeded({ stuck: sample.stuck.map((person) => ({ ...person, source: null, contact: null })), sources: [] })).table;
+    expect(neither).toContain('w-[45%] min-w-44');
+    expect([...neither.matchAll(/<th /g)]).toHaveLength(4);
+  });
+
   test('stuck sign-ups where a table does not fit: the same people as short blocks, with only what there is to say', () => {
     const html = seeded();
     const { list, table } = stuckParts(html);
@@ -277,5 +293,85 @@ describe('the stretch in the address', () => {
     const qc = client();
     qc.setQueryData(key(), sampleSummary({ range: '7d' }));
     expect(words(render(qc))).toContain('13 accounts made in the last 7 days');
+  });
+});
+
+describe('an app with several kinds of sign-up', () => {
+  const KINDS = [
+    { key: 'fans', label: 'Fans' },
+    { key: 'advertisers', label: 'Advertisers' },
+  ];
+  /** The page as it renders at an address with these search params. */
+  const at = (search: string, qc: QueryClient) =>
+    clean(
+      renderToString(
+        <SearchParamsContext value={new URLSearchParams(search)}>
+          <QueryClientProvider client={qc}>
+            <SignupFunnelReport />
+          </QueryClientProvider>
+        </SearchParamsContext>,
+      ),
+    );
+
+  test('a switch between the kinds, on the one these numbers are for, with who counts in it', () => {
+    const qc = client();
+    qc.setQueryData(key(), sampleSummary({ funnel: { key: 'fans', label: 'Fans', description: 'Accounts made on the site' }, funnels: KINDS }));
+    const html = render(qc);
+    expect(html).toContain('aria-label="Kind of sign-up"');
+    expect(words(html)).toContain('Fans Advertisers Accounts made on the site');
+    expect(html).toMatch(/aria-pressed="true"[^>]*>Fans</);
+    expect(html).toMatch(/aria-pressed="false"[^>]*>Advertisers</);
+  });
+
+  test('the kind in the address is read under its own key, and its switch is on it', () => {
+    const qc = client();
+    qc.setQueryData(summaryKey(BASE, '30d', 'advertisers'), sampleSummary({ funnel: { key: 'advertisers', label: 'Advertisers', description: null }, funnels: KINDS, range: '7d' }));
+    const html = at('funnel=advertisers', qc);
+    expect(html).toMatch(/aria-pressed="true"[^>]*>Advertisers</);
+    expect(words(html)).toContain('13 accounts made in the last 7 days');
+    // Nothing kept for it yet: still loading, never another kind's numbers.
+    expect(at('funnel=fans', qc)).toContain('aria-busy="true"');
+  });
+
+  test('an app with one kind has no switch, and no kind has an empty stretch without one', () => {
+    expect(seeded()).not.toContain('Kind of sign-up');
+    const html = seeded({ funnels: KINDS, funnel: { key: 'fans', label: 'Fans', description: null }, accounts: 0 });
+    expect(html).toContain('Kind of sign-up');
+    expect(words(html)).toContain('No accounts were made in the last 30 days');
+  });
+});
+
+describe('also did', () => {
+  test('each side step: how many did it, and how they did against everyone else', () => {
+    const html = seeded({ sideSteps: [{ key: 'liked', label: 'Liked, saved or commented', accounts: 4, reachedGoal: 2 }, { key: 'alerts_on', label: 'Turned on alerts', accounts: 0, reachedGoal: 0 }] });
+    const card = words(html.slice(html.indexOf('>Also did<'), html.indexOf('>What went wrong<')));
+    expect(card).toContain('Not steps, so nobody needs them. How many got as far as “Linked an account” when they did, and when they did not.');
+    expect(card).toContain('Liked, saved or commented 4 accounts Did it 2 of 4 · 50% Did not 1 of 6 · 17%');
+    expect(card).toContain('Turned on alerts 0 accounts Did it 0 of 0 Did not 3 of 10 · 30%');
+    expect(seeded()).not.toContain('Also did');
+  });
+});
+
+describe('phone or computer, when the app does not know', () => {
+  test('says so for everyone, or counts the ones it does not know', () => {
+    expect(words(seeded())).toContain('Not recorded for 2 accounts.');
+    const none = seeded({ devices: [{ device: 'phone', accounts: 0, reachedGoal: 0 }, { device: 'computer', accounts: 0, reachedGoal: 0 }] });
+    expect(words(none)).toContain('Not recorded for these accounts.');
+    expect(words(none)).not.toContain('On a phone');
+  });
+});
+
+describe('steps people went on without', () => {
+  test('the bar says how many, and the stuck list says which steps', () => {
+    const data = sampleSummary();
+    data.bars[1]!.skipped = 3;
+    data.stuck[0]!.skipped = ['Confirmed the email'];
+    const qc = client();
+    qc.setQueryData(key(), data);
+    const text = words(render(qc));
+    expect(text).toContain('Confirmed the email 3 dropped off 3 went on without it 7');
+    expect(text).toContain('Skipped: Confirmed the email');
+    expect(words(seeded())).not.toContain('went on without it');
+    expect(words(seeded())).not.toContain('Skipped:');
   });
 });

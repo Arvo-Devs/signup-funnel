@@ -3,7 +3,8 @@
 // The stretch of time the page shows, kept in the address as ?range= so a
 // view can be shared and survives a reload. 30 days is the default and is
 // left out of the address. SignupFunnelRange goes in the app's page header;
-// SignupFunnelReport reads the same param.
+// SignupFunnelReport reads the same param. The kind of sign-up, for an app
+// with more than one, is kept the same way as ?funnel= (the first is left out).
 import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 import { DEFAULT_FUNNEL_RANGE, FUNNEL_RANGE_LABELS, FUNNEL_RANGES, type FunnelRange } from '../shared/funnel';
@@ -15,6 +16,13 @@ const ITEMS = FUNNEL_RANGES.map((value) => ({ value, label: FUNNEL_RANGE_LABELS[
 export function useFunnelRange(): FunnelRange {
   const params = useSearchParams();
   return pickParam(params?.get('range') ?? null, FUNNEL_RANGES, DEFAULT_FUNNEL_RANGE);
+}
+
+/** The kind of sign-up in the address (?funnel=), or null for the app's first. The server says which kinds there are. */
+export function useFunnelKind(): string | null {
+  const params = useSearchParams();
+  const value = params?.get('funnel')?.trim();
+  return value ? value.slice(0, 40) : null;
 }
 
 /** The range control for the app's page header: accounts made in the last 7, 30 or 90 days. */

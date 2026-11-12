@@ -1,6 +1,6 @@
 {
   "name": "@arvo/signup-funnel",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "private": true,
   "description": "A Sign-up funnel page for an app's admin panel: how far each new account got on the way to its first real use, where each one stopped, and the last thing that went wrong. Each app lists its own steps.",
   "type": "module",

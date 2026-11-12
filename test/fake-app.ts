@@ -2,7 +2,7 @@
 // email, sees a welcome page, makes a key and links an outside account (the
 // goal). Its sign-in reads a `session=<who>` cookie, and anyone on
 // MASS_ACCESS may see the page. Its accounts are a list the test fills.
-import type { FunnelAccount, FunnelConfig, FunnelStepDef, FunnelUser } from '../src/config';
+import type { FunnelAccount, FunnelAccountsHook, FunnelConfig, FunnelDef, FunnelStepDef, FunnelUser } from '../src/config';
 
 export const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1';
 export const CHROME = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36';
@@ -28,8 +28,31 @@ export const PEOPLE: Record<string, Person> = {
 
 export const cookieFor = (who: string) => `theme=dark; session=${who}`;
 
-/** The fake app's config. `db` answers null (no database) and it has no accounts unless the test gives them. */
-export function fakeConfig(overrides: Partial<FunnelConfig<Person>> = {}): FunnelConfig<Person> {
+type FakeOverrides = Partial<{
+  db: FunnelConfig<Person>['db'];
+  signedInUser: FunnelConfig<Person>['signedInUser'];
+  canView: FunnelConfig<Person>['canView'];
+  siteHosts: readonly string[];
+  traffic: boolean;
+  basePath: string;
+  log: FunnelConfig<Person>['log'];
+  steps: readonly FunnelStepDef[];
+  sideSteps: readonly FunnelStepDef[];
+  accounts: FunnelAccountsHook;
+  funnels: readonly FunnelDef[];
+}>;
+
+/**
+ * The fake app's config. `db` answers null (no database) and it has no
+ * accounts unless the test gives them. With `funnels`, it is an app with
+ * several kinds of sign-up and no `steps` of its own.
+ */
+export function fakeConfig(overrides: FakeOverrides = {}): FunnelConfig<Person> {
+  const { funnels, ...rest } = overrides;
+  if (funnels) {
+    const { steps: _steps, sideSteps: _sideSteps, accounts: _accounts, ...shared } = rest;
+    return { ...fakeConfig(), steps: undefined, sideSteps: undefined, accounts: undefined, ...shared, funnels } as FunnelConfig<Person>;
+  }
   return {
     db: () => null,
     signedInUser: async (request) => {
@@ -45,8 +68,8 @@ export function fakeConfig(overrides: Partial<FunnelConfig<Person>> = {}): Funne
     accounts: async () => [],
     siteHosts: SITE_HOSTS,
     log: () => undefined,
-    ...overrides,
-  };
+    ...rest,
+  } as FunnelConfig<Person>;
 }
 
 export type RequestInitLike = {
@@ -76,7 +99,7 @@ export function account(id: string, daysAgo: number, extra: Partial<FunnelAccoun
 }
 
 /** The app's accounts as its `accounts` hook answers them: those made in the range, newest first, up to the limit. */
-export function accountsHook(all: readonly FunnelAccount[]): FunnelConfig<Person>['accounts'] {
+export function accountsHook(all: readonly FunnelAccount[]): FunnelAccountsHook {
   return async ({ from, to, limit }) =>
     all
       .filter((a) => new Date(a.createdAt).getTime() >= from.getTime() && new Date(a.createdAt).getTime() <= to.getTime())
